@@ -8,13 +8,15 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import db
 import faq as faq_module
-from i18n import t, get_lang
+from i18n import t, get_lang, set_user_lang
 from config import SUPPORT_GROUP_ID
 from vpn_api import get_user_info, format_user_info_card
 
@@ -25,6 +27,18 @@ router = Router()
 
 class TicketStates(StatesGroup):
     waiting_for_description = State()
+
+
+# ── Persistent reply keyboard ───────────────────────────────────────────────
+
+def main_reply_kb(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=t(lang, "btn_menu_help")), KeyboardButton(text=t(lang, "btn_menu_close"))],
+            [KeyboardButton(text=t(lang, "btn_menu_lang"))],
+        ],
+        resize_keyboard=True,
+    )
 
 
 # ── Keyboards ────────────────────────────────────────────────────────────────
@@ -77,7 +91,32 @@ def rating_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
 
 @router.message(CommandStart(), F.chat.type == "private")
 async def cmd_start(message: Message, state: FSMContext):
-    lang = get_lang(message.from_user.language_code)
+    lang = get_lang(message.from_user.language_code, message.from_user.id)
+    await state.clear()
+    # Send persistent reply keyboard
+    await message.answer(
+        "🦆",
+        reply_markup=main_reply_kb(lang),
+    )
+    # Send FAQ inline keyboard
+    await message.answer(
+        t(lang, "welcome"),
+        reply_markup=faq_keyboard(lang),
+        parse_mode="HTML",
+    )
+
+
+# ── Persistent menu buttons ──────────────────────────────────────────────────
+
+# Help button — matches both ru and en text
+_help_texts = {"📋 Помощь", "📋 Help"}
+_close_texts = {"🔒 Закрыть тикет", "🔒 Close ticket"}
+_lang_texts = {"🌐 Язык", "🌐 Language"}
+
+
+@router.message(F.chat.type == "private", F.text.in_(_help_texts))
+async def btn_help(message: Message, state: FSMContext):
+    lang = get_lang(message.from_user.language_code, message.from_user.id)
     await state.clear()
     await message.answer(
         t(lang, "welcome"),
@@ -86,11 +125,80 @@ async def cmd_start(message: Message, state: FSMContext):
     )
 
 
+@router.message(F.chat.type == "private", F.text.in_(_close_texts))
+async def btn_close_ticket(message: Message, state: FSMContext):
+    lang = get_lang(message.from_user.language_code, message.from_user.id)
+    await state.clear()
+    ticket = await db.get_open_ticket_for_user(message.from_user.id)
+    if not ticket:
+        await message.answer(t(lang, "no_ticket_to_close"), parse_mode="HTML")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=t(lang, "btn_confirm_close"), callback_data=f"user_close_{ticket['id']}"),
+            InlineKeyboardButton(text=t(lang, "btn_cancel_close"), callback_data="user_close_cancel"),
+        ]
+    ])
+    await message.answer(t(lang, "confirm_close", id=ticket["id"]), reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("user_close_"), ~F.data.startswith("user_close_cancel"))
+async def handle_user_close_confirm(callback: CallbackQuery, bot: Bot):
+    ticket_id = int(callback.data.split("_")[2])
+    ticket = await db.get_ticket_by_id(ticket_id)
+    lang = get_lang(callback.from_user.language_code, callback.from_user.id)
+    if not ticket or ticket["status"] in ("resolved", "closed_auto"):
+        await callback.answer("Тикет уже закрыт.", show_alert=True)
+        return
+    await db.set_ticket_status(ticket_id, "resolved")
+    await callback.message.edit_text(t(lang, "ticket_closed_by_user", id=ticket_id), parse_mode="HTML")
+    # Close forum topic
+    try:
+        await bot.close_forum_topic(chat_id=SUPPORT_GROUP_ID, message_thread_id=ticket["topic_id"])
+        await bot.send_message(
+            chat_id=SUPPORT_GROUP_ID,
+            message_thread_id=ticket["topic_id"],
+            text=f"🔒 Тикет #{ticket_id} закрыт пользователем.",
+        )
+    except Exception as e:
+        print(f"[WARN] Could not close topic: {e}")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "user_close_cancel")
+async def handle_user_close_cancel(callback: CallbackQuery):
+    lang = get_lang(callback.from_user.language_code, callback.from_user.id)
+    await callback.message.edit_text(t(lang, "close_cancelled"), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(F.chat.type == "private", F.text.in_(_lang_texts))
+async def btn_lang(message: Message, state: FSMContext):
+    await state.clear()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="support_lang_ru"),
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="support_lang_en"),
+        ]
+    ])
+    await message.answer(t("ru", "lang_choose"), reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("support_lang_"))
+async def handle_lang_switch(callback: CallbackQuery):
+    lang = callback.data.split("_")[2]  # "ru" or "en"
+    set_user_lang(callback.from_user.id, lang)
+    await callback.message.edit_text(t(lang, "lang_set"), parse_mode="HTML")
+    # Update reply keyboard
+    await callback.message.answer("🦆", reply_markup=main_reply_kb(lang))
+    await callback.answer()
+
+
 # ── FAQ callbacks ─────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.in_(faq_module.FAQ_CALLBACK_MAP.keys()))
 async def handle_faq_button(callback: CallbackQuery, state: FSMContext):
-    lang = get_lang(callback.from_user.language_code)
+    lang = get_lang(callback.from_user.language_code, callback.from_user.id)
     category = faq_module.FAQ_CALLBACK_MAP[callback.data]
     content = faq_module.FAQ_CONTENT.get(category, {}).get(lang, "—")
 
@@ -105,14 +213,14 @@ async def handle_faq_button(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "contact_support")
 async def handle_contact_support(callback: CallbackQuery, state: FSMContext):
-    lang = get_lang(callback.from_user.language_code)
+    lang = get_lang(callback.from_user.language_code, callback.from_user.id)
     await _start_ticket_creation(callback.message, callback.from_user.id, lang, state)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("faq_helped_"))
 async def handle_faq_helped(callback: CallbackQuery, state: FSMContext):
-    lang = get_lang(callback.from_user.language_code)
+    lang = get_lang(callback.from_user.language_code, callback.from_user.id)
     # faq_helped_{category}_{yes|no}
     parts = callback.data.split("_")
     # parts: ['faq', 'helped', category, answer]
@@ -164,7 +272,7 @@ async def _start_ticket_creation(message: Message, user_id: int, lang: str, stat
 async def handle_ticket_description(message: Message, state: FSMContext, bot: Bot):
     """Receive the first ticket message and create the topic."""
     data = await state.get_data()
-    lang = data.get("lang", get_lang(message.from_user.language_code))
+    lang = data.get("lang", get_lang(message.from_user.language_code, message.from_user.id))
     user = message.from_user
 
     # Build subject from first 30 chars of text
@@ -341,7 +449,7 @@ async def handle_user_dm(message: Message, state: FSMContext, bot: Bot):
         return
 
     user = message.from_user
-    lang = get_lang(user.language_code)
+    lang = get_lang(user.language_code, user.id)
 
     # Check for open ticket
     ticket = await db.get_open_ticket_for_user(user.id)
@@ -370,7 +478,7 @@ async def handle_user_dm(message: Message, state: FSMContext, bot: Bot):
 @router.message(F.chat.type == "private", F.sticker)
 async def handle_sticker_dm(message: Message, state: FSMContext):
     """Stickers in DM — show friendly error."""
-    lang = get_lang(message.from_user.language_code)
+    lang = get_lang(message.from_user.language_code, message.from_user.id)
     await message.answer(t(lang, "sticker_not_supported"), parse_mode="HTML")
 
 
@@ -383,7 +491,7 @@ async def handle_rating(callback: CallbackQuery):
     # rate_{ticket_id}_{stars}
     ticket_id = int(parts[1])
     stars = int(parts[2])
-    lang = get_lang(callback.from_user.language_code)
+    lang = get_lang(callback.from_user.language_code, callback.from_user.id)
 
     await db.set_ticket_rating(ticket_id, stars)
     await callback.message.edit_text(

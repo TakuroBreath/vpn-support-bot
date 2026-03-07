@@ -62,6 +62,23 @@ STRINGS = {
         # Support footer
         "support_footer": "\n\n— DuckSurf Support",
 
+        # Persistent menu buttons
+        "btn_menu_help": "📋 Помощь",
+        "btn_menu_close": "🔒 Закрыть тикет",
+        "btn_menu_lang": "🌐 Язык",
+
+        # Close ticket (user side)
+        "no_ticket_to_close": "🤷 У вас нет открытого тикета.",
+        "ticket_closed_by_user": "✅ Тикет #{id} закрыт. Спасибо за обращение! 🦆",
+        "confirm_close": "Вы уверены, что хотите закрыть тикет #{id}?",
+        "btn_confirm_close": "✅ Да, закрыть",
+        "btn_cancel_close": "❌ Отмена",
+        "close_cancelled": "Ок, тикет остаётся открытым.",
+
+        # Language
+        "lang_choose": "🌐 Выберите язык / Choose language:",
+        "lang_set": "✅ Язык изменён на русский.",
+
         # Errors
         "error_generic": "⚠️ Произошла ошибка. Попробуйте позже или напишите /start.",
         "sticker_not_supported": "😅 Стикеры не поддерживаются. Опишите проблему текстом или прикрепите файл/фото.",
@@ -129,6 +146,23 @@ STRINGS = {
         # Support footer
         "support_footer": "\n\n— DuckSurf Support",
 
+        # Persistent menu buttons
+        "btn_menu_help": "📋 Help",
+        "btn_menu_close": "🔒 Close ticket",
+        "btn_menu_lang": "🌐 Language",
+
+        # Close ticket (user side)
+        "no_ticket_to_close": "🤷 You don't have an open ticket.",
+        "ticket_closed_by_user": "✅ Ticket #{id} closed. Thank you! 🦆",
+        "confirm_close": "Are you sure you want to close ticket #{id}?",
+        "btn_confirm_close": "✅ Yes, close",
+        "btn_cancel_close": "❌ Cancel",
+        "close_cancelled": "Ok, ticket stays open.",
+
+        # Language
+        "lang_choose": "🌐 Выберите язык / Choose language:",
+        "lang_set": "✅ Language changed to English.",
+
         # Errors
         "error_generic": "⚠️ An error occurred. Please try again later or send /start.",
         "sticker_not_supported": "😅 Stickers are not supported. Please describe the issue in text or attach a file/photo.",
@@ -136,8 +170,18 @@ STRINGS = {
 }
 
 
-def get_lang(language_code: str | None) -> str:
-    """Detect language: 'ru' if starts with 'ru', otherwise 'en'."""
+# In-memory language overrides (user_id → lang)
+_user_langs: dict[int, str] = {}
+
+
+def set_user_lang(user_id: int, lang: str):
+    _user_langs[user_id] = lang
+
+
+def get_lang(language_code: str | None, user_id: int | None = None) -> str:
+    """Get language: check override first, then Telegram language_code."""
+    if user_id and user_id in _user_langs:
+        return _user_langs[user_id]
     if language_code and language_code.startswith("ru"):
         return "ru"
     return "en"
