@@ -79,7 +79,7 @@ async def _forward_support_to_user(bot: Bot, message: Message, ticket: dict):
 
 # ── Group message handler ─────────────────────────────────────────────────────
 
-@router.message(F.chat.id == SUPPORT_GROUP_ID, F.chat.type.in_({"group", "supergroup"}))
+@router.message(F.chat.id == SUPPORT_GROUP_ID, F.chat.type.in_({"group", "supergroup"}), F.from_user)
 async def handle_group_message(message: Message, bot: Bot):
     """Handle messages in the support group topics → forward to user DM."""
     # Skip messages not in a topic thread
@@ -87,11 +87,12 @@ async def handle_group_message(message: Message, bot: Bot):
         return
 
     # Skip bot's own messages
-    if message.from_user and message.from_user.id == bot.id:
+    if message.from_user.id == bot.id:
         return
 
-    # Skip system/service messages
-    if message.from_user is None:
+    # Skip service/system messages (topic created, pinned, etc.)
+    if not any([message.text, message.photo, message.video, message.document,
+                message.voice, message.video_note, message.audio, message.sticker]):
         return
 
     topic_id = message.message_thread_id

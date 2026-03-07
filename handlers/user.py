@@ -327,9 +327,14 @@ async def _forward_user_message_to_topic(bot: Bot, message: Message, chat_id: in
 
 # ── User messages after ticket created ───────────────────────────────────────
 
-@router.message(F.chat.type == "private", ~F.sticker)
+@router.message(F.chat.type == "private", ~F.sticker, F.from_user)
 async def handle_user_dm(message: Message, state: FSMContext, bot: Bot):
     """Any DM message that isn't in a special state → find open ticket and forward."""
+    # Skip service messages (no content)
+    if not any([message.text, message.photo, message.video, message.document,
+                message.voice, message.video_note, message.audio, message.caption]):
+        return
+
     # Skip if in a state (handled by state handler above)
     current_state = await state.get_state()
     if current_state is not None:
@@ -357,7 +362,6 @@ async def handle_user_dm(message: Message, state: FSMContext, bot: Bot):
         raw_text = message.text or message.caption or ""
         await db.add_message(ticket["id"], "user", raw_text or "[media]", message.message_id)
         await db.update_ticket_activity(ticket["id"])
-        await message.answer(t(lang, "ticket_message_forwarded"), parse_mode="HTML")
     except Exception as e:
         print(f"[ERROR] Failed to forward DM to topic: {e}")
         await message.answer(t(lang, "error_generic"), parse_mode="HTML")
