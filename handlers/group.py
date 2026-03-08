@@ -1,6 +1,7 @@
 """Group handlers — support replies, ticket control buttons."""
 
 from aiogram import Router, F, Bot
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 import db
@@ -206,3 +207,97 @@ def _closed_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
 @router.callback_query(F.data.startswith("closed_"))
 async def handle_closed_noop(callback: CallbackQuery):
     await callback.answer("Тикет уже закрыт.", show_alert=False)
+
+
+# ── Ban callback ──────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("ban_ticket_"))
+async def handle_ban_ticket(callback: CallbackQuery, bot: Bot):
+    """Ban the ticket's user, close the ticket."""
+    ticket_id = int(callback.data.split("_")[2])
+    ticket = await db.get_ticket_by_id(ticket_id)
+
+    if not ticket:
+        await callback.answer("Тикет не найден.", show_alert=True)
+        return
+
+    user_id = ticket["telegram_id"]
+    banned_by = callback.from_user.id
+
+    # Add to blacklist
+    await db.add_to_blacklist(
+        telegram_id=user_id,
+        reason=f"Banned via ticket #{ticket_id}",
+        banned_by=banned_by,
+    )
+
+    # Close ticket if still open
+    if ticket["status"] not in ("resolved", "closed_auto"):
+        await db.set_ticket_status(ticket_id, "resolved")
+
+    # Update buttons
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=_closed_keyboard(ticket_id)
+        )
+    except Exception as e:
+        print(f"[WARN] Could not edit info card buttons: {e}")
+
+    # Close forum topic
+    try:
+        await bot.close_forum_topic(
+            chat_id=SUPPORT_GROUP_ID,
+            message_thread_id=ticket["topic_id"],
+        )
+    except Exception as e:
+        print(f"[WARN] Could not close forum topic {ticket['topic_id']}: {e}")
+
+    await callback.answer(
+        f"🚫 Пользователь {user_id} заблокирован, тикет #{ticket_id} закрыт.",
+        show_alert=True,
+    )
+    print(f"[BAN] User {user_id} banned via ticket #{ticket_id} by {banned_by}")
+
+
+# ── /unban command ────────────────────────────────────────────────────────────
+
+@router.message(
+    Command("unban"),
+    F.chat.id == SUPPORT_GROUP_ID,
+    F.chat.type.in_({"group", "supergroup"}),
+)
+async def handle_unban(message: Message):
+    """Remove a user from the blacklist. Usage: /unban <telegram_id>"""
+    parts = (message.text or "").split()
+    if len(parts) < 2 or not parts[1].lstrip("-").isdigit():
+        await message.reply("⚠️ Использование: /unban <telegram_id>")
+        return
+
+    telegram_id = int(parts[1])
+    await db.remove_from_blacklist(telegram_id)
+    await message.reply(f"✅ Пользователь {telegram_id} разблокирован.")
+    print(f"[UNBAN] User {telegram_id} removed from blacklist by {message.from_user.id}")
+
+
+# ── /blacklist command ────────────────────────────────────────────────────────
+
+@router.message(
+    Command("blacklist"),
+    F.chat.id == SUPPORT_GROUP_ID,
+    F.chat.type.in_({"group", "supergroup"}),
+)
+async def handle_blacklist(message: Message):
+    """Show the current blacklist."""
+    entries = await db.get_blacklist()
+    if not entries:
+        await message.reply("Чёрный список пуст.")
+        return
+
+    lines = ["🚫 <b>Чёрный список:</b>\n"]
+    for e in entries:
+        reason = e["reason"] or "—"
+        banned_by = e["banned_by"] or "—"
+        lines.append(
+            f"• <code>{e['telegram_id']}</code> | {reason} | by {banned_by} | {e['created_at']}"
+        )
+    await message.reply("\n".join(lines), parse_mode="HTML")

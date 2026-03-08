@@ -40,6 +40,15 @@ CREATE TABLE IF NOT EXISTS faq_stats (
 );
 """
 
+CREATE_BLACKLIST = """
+CREATE TABLE IF NOT EXISTS blacklist (
+    telegram_id INTEGER PRIMARY KEY,
+    reason TEXT,
+    banned_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 async def init_db():
     """Initialize database schema."""
@@ -47,6 +56,7 @@ async def init_db():
         await db.execute(CREATE_TICKETS)
         await db.execute(CREATE_MESSAGES)
         await db.execute(CREATE_FAQ_STATS)
+        await db.execute(CREATE_BLACKLIST)
         await db.commit()
     print(f"[DB] Database initialized at {DB_PATH}")
 
@@ -173,3 +183,42 @@ async def log_faq_stat(category: str, helped: bool):
             (category, helped),
         )
         await db.commit()
+
+
+# ── Blacklist ─────────────────────────────────────────────────────────────────
+
+async def add_to_blacklist(telegram_id: int, reason: str | None, banned_by: int | None):
+    """Add a user to the blacklist."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO blacklist (telegram_id, reason, banned_by) VALUES (?, ?, ?)",
+            (telegram_id, reason, banned_by),
+        )
+        await db.commit()
+
+
+async def remove_from_blacklist(telegram_id: int):
+    """Remove a user from the blacklist."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM blacklist WHERE telegram_id = ?", (telegram_id,))
+        await db.commit()
+
+
+async def is_blacklisted(telegram_id: int) -> bool:
+    """Check whether a user is blacklisted."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM blacklist WHERE telegram_id = ?", (telegram_id,)
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def get_blacklist() -> list[dict]:
+    """Return all blacklisted users."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT telegram_id, reason, banned_by, created_at FROM blacklist ORDER BY created_at DESC"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

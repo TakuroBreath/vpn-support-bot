@@ -82,6 +82,12 @@ STRINGS = {
         # Errors
         "error_generic": "⚠️ Произошла ошибка. Попробуйте позже или напишите /start.",
         "sticker_not_supported": "😅 Стикеры не поддерживаются. Опишите проблему текстом или прикрепите файл/фото.",
+
+        # Blacklist
+        "blacklisted": "🚫 Вы заблокированы в поддержке.",
+        "user_blocked": "Пользователь заблокирован",
+        "user_unblocked": "Пользователь разблокирован",
+        "blacklist_empty": "Чёрный список пуст",
     },
     "en": {
         # /start
@@ -166,6 +172,12 @@ STRINGS = {
         # Errors
         "error_generic": "⚠️ An error occurred. Please try again later or send /start.",
         "sticker_not_supported": "😅 Stickers are not supported. Please describe the issue in text or attach a file/photo.",
+
+        # Blacklist
+        "blacklisted": "🚫 You are blocked from support.",
+        "user_blocked": "User blocked",
+        "user_unblocked": "User unblocked",
+        "blacklist_empty": "Blacklist is empty",
     },
 }
 

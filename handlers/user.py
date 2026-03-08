@@ -251,6 +251,11 @@ async def handle_faq_helped(callback: CallbackQuery, state: FSMContext):
 
 async def _start_ticket_creation(message: Message, user_id: int, lang: str, state: FSMContext):
     """Ask user to describe their problem."""
+    # Check if user is blacklisted
+    if await db.is_blacklisted(user_id):
+        await message.answer(t(lang, "blacklisted"), parse_mode="HTML")
+        return
+
     # Check if user already has an open ticket
     existing = await db.get_open_ticket_for_user(user_id)
     if existing:
@@ -361,6 +366,7 @@ def _ticket_control_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="✅ Закрыть тикет", callback_data=f"close_ticket_{ticket_id}"),
                 InlineKeyboardButton(text="⏸ В ожидании", callback_data=f"wait_ticket_{ticket_id}"),
+                InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"ban_ticket_{ticket_id}"),
             ]
         ]
     )
@@ -450,6 +456,11 @@ async def handle_user_dm(message: Message, state: FSMContext, bot: Bot):
 
     user = message.from_user
     lang = get_lang(user.language_code, user.id)
+
+    # Check if user is blacklisted
+    if await db.is_blacklisted(user.id):
+        await message.answer(t(lang, "blacklisted"), parse_mode="HTML")
+        return
 
     # Check for open ticket
     ticket = await db.get_open_ticket_for_user(user.id)
