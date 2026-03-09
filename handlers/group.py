@@ -7,6 +7,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 import db
 from i18n import t
 from config import SUPPORT_GROUP_ID
+from vpn_api import get_user_info, extend_subscription, clear_referral_balance
 
 router = Router()
 
@@ -277,6 +278,147 @@ async def handle_unban(message: Message):
     await db.remove_from_blacklist(telegram_id)
     await message.reply(f"✅ Пользователь {telegram_id} разблокирован.")
     print(f"[UNBAN] User {telegram_id} removed from blacklist by {message.from_user.id}")
+
+
+# ── Add days callbacks ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("add_days_"))
+async def handle_add_days(callback: CallbackQuery, bot: Bot):
+    """Support clicks 'Add days' button — show day selection."""
+    ticket_id = int(callback.data.split("_")[2])
+    ticket = await db.get_ticket_by_id(ticket_id)
+    if not ticket:
+        await callback.answer("Тикет не найден.", show_alert=True)
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="1 день", callback_data=f"confirm_days_{ticket_id}_1"),
+            InlineKeyboardButton(text="3 дня", callback_data=f"confirm_days_{ticket_id}_3"),
+            InlineKeyboardButton(text="7 дней", callback_data=f"confirm_days_{ticket_id}_7"),
+        ],
+        [
+            InlineKeyboardButton(text="14 дней", callback_data=f"confirm_days_{ticket_id}_14"),
+            InlineKeyboardButton(text="30 дней", callback_data=f"confirm_days_{ticket_id}_30"),
+        ],
+        [
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_action_{ticket_id}"),
+        ],
+    ])
+    await callback.message.reply(
+        f"🎁 Выберите количество дней для добавления к подписке (тикет #{ticket_id}):",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("confirm_days_"))
+async def handle_confirm_days(callback: CallbackQuery, bot: Bot):
+    """Support selects how many days to add."""
+    parts = callback.data.split("_")
+    # confirm_days_{ticket_id}_{days}
+    ticket_id = int(parts[2])
+    days = int(parts[3])
+
+    ticket = await db.get_ticket_by_id(ticket_id)
+    if not ticket:
+        await callback.answer("Тикет не найден.", show_alert=True)
+        return
+
+    telegram_id = ticket.get("telegram_id")
+    if not telegram_id:
+        await callback.answer("Не найден telegram_id в тикете.", show_alert=True)
+        return
+
+    # Get subscription UUID
+    user_data = await get_user_info(telegram_id)
+    if not user_data or not user_data.get("uuid"):
+        await callback.answer("❌ Подписка пользователя не найдена.", show_alert=True)
+        return
+
+    uuid = user_data["uuid"]
+    result = await extend_subscription(uuid, days)
+    if not result:
+        await callback.answer("❌ Не удалось добавить дни. Попробуйте позже.", show_alert=True)
+        return
+
+    username = ticket.get("username")
+    username_str = f"@{username}" if username else f"id{telegram_id}"
+
+    await callback.message.reply(
+        f"✅ Добавлено {days} дн. к подписке {username_str}"
+    )
+    await callback.answer(f"✅ +{days} дней добавлено")
+    print(f"[ADMIN ACTION] Added {days} days to subscription {uuid} for user {telegram_id} (ticket #{ticket_id})")
+
+
+# ── Clear referral balance callbacks ─────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("clear_ref_"))
+async def handle_clear_ref(callback: CallbackQuery, bot: Bot):
+    """Support clicks 'Clear referral balance' — show confirmation."""
+    ticket_id = int(callback.data.split("_")[2])
+    ticket = await db.get_ticket_by_id(ticket_id)
+    if not ticket:
+        await callback.answer("Тикет не найден.", show_alert=True)
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, очистить", callback_data=f"confirm_clear_ref_{ticket_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_action_{ticket_id}"),
+        ]
+    ])
+    await callback.message.reply(
+        f"💸 Вы уверены, что хотите обнулить реферальный баланс пользователя (тикет #{ticket_id})?",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("confirm_clear_ref_"))
+async def handle_confirm_clear_ref(callback: CallbackQuery, bot: Bot):
+    """Confirm and execute referral balance clear."""
+    ticket_id = int(callback.data.split("_")[3])
+
+    ticket = await db.get_ticket_by_id(ticket_id)
+    if not ticket:
+        await callback.answer("Тикет не найден.", show_alert=True)
+        return
+
+    telegram_id = ticket.get("telegram_id")
+    if not telegram_id:
+        await callback.answer("Не найден telegram_id в тикете.", show_alert=True)
+        return
+
+    # Get subscription UUID
+    user_data = await get_user_info(telegram_id)
+    if not user_data or not user_data.get("uuid"):
+        await callback.answer("❌ Подписка пользователя не найдена.", show_alert=True)
+        return
+
+    uuid = user_data["uuid"]
+    result = await clear_referral_balance(uuid)
+    if not result:
+        await callback.answer("❌ Не удалось очистить баланс. Попробуйте позже.", show_alert=True)
+        return
+
+    cleared = result.get("cleared_amount", 0) or 0
+    username = ticket.get("username")
+    username_str = f"@{username}" if username else f"id{telegram_id}"
+
+    await callback.message.reply(
+        f"✅ Реферальный баланс {username_str} очищен (было ${cleared:.2f})"
+    )
+    await callback.answer("✅ Баланс очищен")
+    print(f"[ADMIN ACTION] Cleared referral balance for uuid={uuid}, cleared={cleared:.2f} (ticket #{ticket_id})")
+
+
+@router.callback_query(F.data.startswith("cancel_action_"))
+async def handle_cancel_action(callback: CallbackQuery):
+    """Cancel any pending action (add days / clear ref)."""
+    await callback.message.delete()
+    await callback.answer("Отменено.")
 
 
 # ── /blacklist command ────────────────────────────────────────────────────────

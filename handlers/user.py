@@ -18,7 +18,7 @@ import db
 import faq as faq_module
 from i18n import t, get_lang, set_user_lang
 from config import SUPPORT_GROUP_ID
-from vpn_api import get_user_info, format_user_info_card
+from vpn_api import get_user_info, format_user_info_card, get_referral_stats
 
 router = Router()
 
@@ -294,7 +294,7 @@ async def handle_ticket_description(message: Message, state: FSMContext, bot: Bo
 
     # Fetch VPN user info
     vpn_info = await get_user_info(user.id)
-    info_card = format_user_info_card(vpn_info, user.id, user.username)
+    info_card = await format_user_info_card(vpn_info, user.id, user.username)
 
     # Topic name: "#42 | @username | Short description"
     username_display = f"@{user.username}" if user.username else f"id{user.id}"
@@ -367,7 +367,11 @@ def _ticket_control_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="✅ Закрыть тикет", callback_data=f"close_ticket_{ticket_id}"),
                 InlineKeyboardButton(text="⏸ В ожидании", callback_data=f"wait_ticket_{ticket_id}"),
                 InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"ban_ticket_{ticket_id}"),
-            ]
+            ],
+            [
+                InlineKeyboardButton(text="🎁 Добавить дни", callback_data=f"add_days_{ticket_id}"),
+                InlineKeyboardButton(text="💸 Очистить рефералку", callback_data=f"clear_ref_{ticket_id}"),
+            ],
         ]
     )
 
