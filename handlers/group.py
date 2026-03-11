@@ -404,11 +404,12 @@ async def handle_confirm_clear_ref(callback: CallbackQuery, bot: Bot):
         return
 
     cleared = result.get("cleared_amount", 0) or 0
+    cleared_rub = result.get("cleared_amount_rub", cleared * 75) or 0
     username = ticket.get("username")
     username_str = f"@{username}" if username else f"id{telegram_id}"
 
     await callback.message.reply(
-        f"✅ Реферальный баланс {username_str} очищен (было ${cleared:.2f})"
+        f"✅ Реферальный баланс {username_str} очищен (было ${cleared:.2f} / {cleared_rub:.0f}₽)"
     )
     await callback.answer("✅ Баланс очищен")
     print(f"[ADMIN ACTION] Cleared referral balance for uuid={uuid}, cleared={cleared:.2f} (ticket #{ticket_id})")

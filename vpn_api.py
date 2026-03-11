@@ -152,7 +152,8 @@ async def format_user_info_card(user_data: dict | None, telegram_id: int, userna
             ref_stats = await get_referral_stats(uuid)
             if ref_stats is not None:
                 earnings = ref_stats.get("total_earnings", 0) or 0
-                lines.append(f"💰 Реферальный баланс: ${earnings:.2f}")
+                earnings_rub = ref_stats.get("total_earnings_rub", earnings * 75) or 0
+                lines.append(f"💰 Реферальный баланс: ${earnings:.2f} ({earnings_rub:.0f}₽)")
     else:
         lines.append("Подписка: ❓ Не найдена в системе")
 
